@@ -44,3 +44,7 @@ asyncio.run(download_multiple_files(urls_and_ranges, headers))
 ```bash
 python main.py
 ```
+
+## Architectural Decision Records
+
+- [Why use asyncio?](./ard/why-use-asyncio)
