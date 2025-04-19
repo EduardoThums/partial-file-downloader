@@ -97,35 +97,48 @@ async def download_multiple_files(urls_and_ranges, custom_headers=None):
         console=console,
     )
 
+    tasks = []
+
     async with aiohttp.ClientSession() as session:
-        tasks = []
         with progress:
-            for url, end_byte in urls_and_ranges:
-                # Generate output path from URL
-                parsed_url = urlparse(url)
-                filename = os.path.basename(parsed_url.path)
-                if not filename:
-                    filename = "downloaded_file"
-                output_path = os.path.join("downloads", filename)
+            # Use a semaphore to limit concurrent downloads
+            semaphore = asyncio.Semaphore(10)  # Allow 3 concurrent downloads
 
-                if (
-                    os.path.exists(output_path)
-                    and os.path.getsize(output_path) == end_byte
-                ):
-                    print(f"Skipping {output_path} because it already fully downloaded")
-                    continue
+            async def download_with_semaphore(url, end_byte):
+                async with semaphore:
+                    # Generate output path from URL
+                    parsed_url = urlparse(url)
+                    filename = os.path.basename(parsed_url.path)
+                    if not filename:
+                        filename = "downloaded_file"
+                    output_path = os.path.join("downloads", filename)
 
-                task_id = progress.add_task(f"Downloading {filename}", total=end_byte)
-                task = download_single_file(
-                    session,
-                    url,
-                    end_byte,
-                    output_path,
-                    custom_headers,
-                    progress,
-                    task_id,
-                )
-                tasks.append(task)
+                    if (
+                        os.path.exists(output_path)
+                        and os.path.getsize(output_path) == end_byte
+                    ):
+                        print(
+                            f"Skipping {output_path} because it already fully downloaded"
+                        )
+                        return
 
-            results = await asyncio.gather(*tasks)
-            return results
+                    task_id = progress.add_task(
+                        f"Downloading {filename}", total=end_byte
+                    )
+                    await download_single_file(
+                        session,
+                        url,
+                        end_byte,
+                        output_path,
+                        custom_headers,
+                        progress,
+                        task_id,
+                    )
+
+            # Create tasks for all downloads
+            tasks = [
+                download_with_semaphore(url, end_byte)
+                for url, end_byte in urls_and_ranges
+            ]
+            # Run all tasks concurrently, with semaphore limiting concurrency
+            await asyncio.gather(*tasks)
